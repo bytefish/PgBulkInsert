@@ -109,7 +109,7 @@ keeping your application's memory usage constant regardless of the total number 
 
 ## Mastering the Fluent API ##
 
-The API is designed around a so called `PostgresType`. This class serves as your single 
+The API is designed around so called `PostgresTypes`. This class serves as your single 
 entry point for all PostgreSQL data types.
 
 ### The Power of PostgresTypes ###
