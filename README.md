@@ -25,8 +25,144 @@ You can add the following dependencies to your pom.xml to include [PgBulkInsert]
 <dependency>
     <groupId>de.bytefish</groupId>
     <artifactId>pgbulkinsert</artifactId>
-    <version>8.1.8</version>
+    <version>9.0.0</version>
 </dependency>
+```
+
+## PgBulkInsert 9: Modern, Functional API ##
+
+PgBulkInsert 9.0.0 comes with a new API, that focuses on a functional API surface leveraging modern Java 
+features (Lambdas, Method References, and Records) and reduces memory allocation-overhead.
+
+## Quick Start ##
+
+The new API separates the What (Structure and Mapping) from the How (Execution and Configuration).
+
+### 1. Define your Data Model ###
+
+The library works with Java Records, POJOs, or any other data carrier.
+
+```java
+public record UserSession(
+    UUID id,
+    long visits,         // Primitive
+    String userAgent,    // Nullable String
+    Instant createdAt,   // Precise Timestamp
+    double[] latLon,     // Array
+    PgPoint location     // Geometric Point
+) {}
+```
+
+### 2. Define your Mapping ###
+
+The `PgMapper` is the heart of the library. It is stateless and thread-safe.
+
+```java
+PgMapper<UserSession> mapper = PgMapper.forClass(UserSession.class)
+    .map("id", PostgresTypes.UUID.from(UserSession::id))
+    
+    // ZERO-ALLOCATION: Direct access to primitives via ToLongFunction
+    .map("visits", PostgresTypes.INT8.primitive(UserSession::visits))
+    
+    // SAFE STRINGS: Strips invalid \u0000 characters to prevent COPY errors
+    .map("user_agent", PostgresTypes.TEXT.removeNullCharacters().from(UserSession::userAgent))
+    
+    // TYPE-SAFE TIME: Validated at compile-time to prevent timezone issues
+    .map("created_at", PostgresTypes.TIMESTAMPTZ.instant(UserSession::createdAt))
+    
+    // GEOMETRY: Native support for Postgres geometric types
+    .map("location", PostgresTypes.POINT.from(UserSession::location));
+```
+
+### 3. Configure and Execute ###
+
+The `PgBulkWriter` handles execution details like buffer sizes and stream management.
+
+```java
+PgBulkWriter<UserSession> writer = new PgBulkWriter<>(mapper)
+    .withBufferSize(256 * 1024); // 256 KB Buffer
+
+try (Connection conn = dataSource.getConnection()) {
+    writer.saveAll(conn, "public.user_sessions", sessionList);
+}
+```
+
+## Streaming and Lazy Evaluation ##
+
+One of the key strengths of the `saveAll` method is that it accepts an `Iterable<T>`. This means you are never 
+forced to load your entire dataset into memory.
+
+If you are working with a Java Stream (e.g., from a file, a reactive source, or another database), you 
+can pass it directly using a method reference:
+
+```java
+Stream<UserSession> massiveStream = getMassiveStreamFromSource();
+
+try (Connection conn = dataSource.getConnection()) {
+    // Uses the stream's iterator to pull data lazily
+    writer.saveAll(conn, "public.user_sessions", massiveStream::iterator);
+}
+```
+
+This approach ensures that records are transformed and written to the PostgreSQL wire format on-the-fly, 
+keeping your application's memory usage constant regardless of the total number of rows.
+
+## Mastering the Fluent API ##
+
+The API is designed around a so called `PostgresType`. This class serves as your single 
+entry point for all PostgreSQL data types.
+
+### The Power of PostgresTypes ###
+
+Instead of a generic `map()` method that tries to guess your intent, the API uses a "Type-First" 
+approach. When you type `PostgresTypes.INT4.`, your IDE will offer specific choices:
+
+* `.primitive(ToIntFunction<T>)`: High-performance path. No objects created on the heap.
+* `.boxed(Function<T, Integer>)`: Use this for nullable database columns or if your POJO uses Integer.
+* `.from(Function<T, Integer>)`: Standard object mapping.
+
+### Eliminating Timezone Confusion ###
+
+One of the most common bugs is the confusion between `timestamp` and `timestamptz`.
+
+The API solves this:
+
+* `PostgresTypes.TIMESTAMP` only allows `.localDateTime()`.
+* `PostgresTypes.TIMESTAMPTZ` allows `.instant()`, `.zonedDateTime()`, or `.offsetDateTime()`.
+
+## Advanced Type Mapping ##
+
+### N-Dimensional Arrays (Matrices & Tensors) ###
+
+```java
+// Mapping a 2D Matrix (Collection of Collections)
+.map("data_matrix", PostgresTypes.array2D(PostgresTypes.INT4).from(MyEntity::getMatrix))
+
+// Mapping a 3D Tensor
+.map("data_tensor", PostgresTypes.array3D(PostgresTypes.FLOAT8).from(MyEntity::getTensor))
+```
+
+### Ranges ###
+
+```java
+// Mapping an integer range
+.map("age_limit", PostgresTypes.INT4RANGE.from(MyEntity::getAgeRange))
+
+// Mapping a timestamp range
+.map("validity", PostgresTypes.TSRANGE.from(MyEntity::getValidityPeriod))
+```
+
+### Geometric Types ###
+
+Native support for all PostgreSQL geometric types using dedicated helper records:
+
+* `POINT`: `PostgresTypes.POINT`
+* `CIRCLE`: `PostgresTypes.CIRCLE`
+* `POLYGON`: `PostgresTypes.POLYGON`
+* `PATH` / `LSEG` / `BOX` / `LINE`
+
+```java
+.map("area", PostgresTypes.POLYGON.from(MyEntity::getBoundaries))
 ```
 
 ## Supported PostgreSQL Types ##

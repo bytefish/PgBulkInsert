@@ -4,6 +4,9 @@ import de.bytefish.pgbulkinsert.PgBulkInsert;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -18,22 +21,23 @@ import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
 import java.math.BigInteger;
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class IntegrationTest {
 
-    // Passe diese Verbindungsdaten an deinen laufenden Docker-Container an
-    private static final String JDBC_URL = "jdbc:postgresql://localhost:5432/postgres";
-    private static final String DB_USER = "postgres";
-    private static final String DB_PASSWORD = "password";
-
     private static Connection connection;
 
     @BeforeAll
     public static void setupDatabase() throws Exception {
-        connection = DriverManager.getConnection(JDBC_URL, DB_USER, DB_PASSWORD);
+        Properties properties = getProperties("db.properties");
+
+        connection = DriverManager.getConnection(
+                properties.getProperty("db.url"),
+                properties.getProperty("db.user"),
+                properties.getProperty("db.password"));
 
         // Create Test Table handle all the various data types
         try (Statement stmt = connection.createStatement()) {
@@ -137,7 +141,7 @@ public class IntegrationTest {
             // Verify first element
             assertTrue(rs.next());
             assertEquals(1L, rs.getLong("id"));
-            assertEquals("Normaler Text", rs.getString("text_val"));
+            assertEquals("Normal Text", rs.getString("text_val"));
             assertEquals(new BigDecimal("42.1234"), rs.getBigDecimal("numeric_val"));
             assertEquals(new BigInteger("98765432101234567890987654321"), rs.getBigDecimal("numeric_int_val").toBigInteger());
             assertTrue(rs.getBoolean("is_active"));
@@ -160,7 +164,7 @@ public class IntegrationTest {
             // Verify Null-Byte Handling
             assertTrue(rs.next());
             assertEquals(2L, rs.getLong("id"));
-            assertEquals("Fieser  Text", rs.getString("text_val")); // \u0000 wurde restlos entfernt!
+            assertEquals("Bad  Text", rs.getString("text_val"));
             assertEquals(new BigDecimal("-99.99"), rs.getBigDecimal("numeric_val"));
             assertEquals(new BigInteger("-12345678909876543210123456789"), rs.getBigDecimal("numeric_int_val").toBigInteger());
 
@@ -182,5 +186,21 @@ public class IntegrationTest {
 
             assertTrue(!rs.next());
         }
+    }
+
+    private static Properties getProperties(String filename) {
+
+        Properties props = new Properties();
+
+        InputStream is = ClassLoader.getSystemResourceAsStream(filename);
+
+        try {
+            props.load(is);
+        }
+        catch (IOException e) {
+            throw new RuntimeException("Could not load unittest.properties", e);
+        }
+
+        return props;
     }
 }

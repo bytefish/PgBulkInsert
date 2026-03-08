@@ -10,6 +10,8 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -30,6 +32,16 @@ public class PgBulkInsert {
     public interface ToShortFunction<T> {
         short applyAsShort(T value);
     }
+
+    // Geometric Types
+    public record PgPoint(double x, double y) {}
+    public record PgLine(double a, double b, double c) {}
+    public record PgLseg(PgPoint p1, PgPoint p2) {}
+    public record PgBox(PgPoint p1, PgPoint p2) {}
+    public record PgPath(boolean closed, List<PgPoint> points) {}
+    public record PgPolygon(List<PgPoint> points) {}
+    public record PgCircle(PgPoint center, double radius) {}
+
 
     public record PgRange<T>(T lower, T upper, boolean lowerInclusive, boolean upperInclusive, boolean lowerInfinite,
                              boolean upperInfinite, boolean empty) {
@@ -114,8 +126,23 @@ public class PgBulkInsert {
 
         void writeHstore(Map<String, String> v) throws IOException;
 
+        // Network
+        void writeInet(InetAddress v) throws IOException;
+        void writeMacAddress(String v) throws IOException;
+
+        // Geometry
+        void writePoint(PgPoint v) throws IOException;
+        void writeLine(PgLine v) throws IOException;
+        void writeLseg(PgLseg v) throws IOException;
+        void writeBox(PgBox v) throws IOException;
+        void writePath(PgPath v) throws IOException;
+        void writePolygon(PgPolygon v) throws IOException;
+        void writeCircle(PgCircle v) throws IOException;
+
+        // Arrays
         <E> void writeArray(Collection<?> elements, PgType<E> baseElementType) throws IOException;
 
+        // Ranges
         <E> void writeRange(PgRange<E> range, PgType<E> elementType) throws IOException;
     }
 
@@ -297,6 +324,46 @@ public class PgBulkInsert {
             }
         }
 
+        @Override public void writeInet(InetAddress v) throws IOException {
+            byte[] addr = v.getAddress();
+            out.writeInt(addr.length + 4);
+            out.writeByte(v instanceof Inet4Address ? 2 : 3); // PGSQL_AF_INET or INET6
+            out.writeByte(addr.length * 8); // mask
+            out.writeByte(0); // is_res
+            out.writeByte(addr.length);
+            out.write(addr);
+        }
+
+        @Override public void writeMacAddress(String v) throws IOException {
+            String[] hex = v.split("[:-]");
+            out.writeInt(6);
+            for (String s : hex) out.writeByte(Integer.parseInt(s, 16));
+        }
+
+        @Override public void writePoint(PgPoint v) throws IOException { out.writeInt(16); out.writeDouble(v.x()); out.writeDouble(v.y()); }
+
+        @Override public void writeLine(PgLine v) throws IOException { out.writeInt(24); out.writeDouble(v.a()); out.writeDouble(v.b()); out.writeDouble(v.c()); }
+
+        @Override public void writeLseg(PgLseg v) throws IOException { out.writeInt(32); writePointInternal(v.p1()); writePointInternal(v.p2()); }
+
+        @Override public void writeBox(PgBox v) throws IOException { out.writeInt(32); writePointInternal(v.p1()); writePointInternal(v.p2()); }
+
+        @Override public void writePath(PgPath v) throws IOException {
+            out.writeInt(1 + 4 + (v.points().size() * 16));
+            out.writeByte(v.closed() ? 1 : 0);
+            out.writeInt(v.points().size());
+            for (PgPoint p : v.points()) writePointInternal(p);
+        }
+
+        @Override public void writePolygon(PgPolygon v) throws IOException {
+            out.writeInt(4 + (v.points().size() * 16));
+            out.writeInt(v.points().size());
+            for (PgPoint p : v.points()) writePointInternal(p);
+        }
+
+        @Override public void writeCircle(PgCircle v) throws IOException { out.writeInt(24); writePointInternal(v.center()); out.writeDouble(v.radius()); }
+
+        private void writePointInternal(PgPoint p) throws IOException { out.writeDouble(p.x()); out.writeDouble(p.y()); }
 
         @Override public <E> void writeArray(Collection<?> elements, PgType<E> baseElementType) throws IOException {
             if (elements == null) { writeNull(); return; }
@@ -304,8 +371,7 @@ public class PgBulkInsert {
             // Determine dimensions
             List<Integer> dims = new ArrayList<>();
             Object current = elements;
-            while (current instanceof Collection) {
-                Collection<?> c = (Collection<?>) current;
+            while (current instanceof Collection<?> c) {
                 dims.add(c.size());
                 if (c.isEmpty()) break;
                 current = c.iterator().next();
@@ -685,6 +751,24 @@ public class PgBulkInsert {
             }
         };
 
+        // Geometry
+        public static final PgType<PgPoint> POINT = createType(600, BinaryRowWriter::writePoint);
+        public static final PgType<PgLine> LINE = createType(628, BinaryRowWriter::writeLine);
+        public static final PgType<PgLseg> LSEG = createType(601, BinaryRowWriter::writeLseg);
+        public static final PgType<PgBox> BOX = createType(603, BinaryRowWriter::writeBox);
+        public static final PgType<PgPath> PATH = createType(602, BinaryRowWriter::writePath);
+        public static final PgType<PgPolygon> POLYGON = createType(604, BinaryRowWriter::writePolygon);
+        public static final PgType<PgCircle> CIRCLE = createType(718, BinaryRowWriter::writeCircle);
+
+        // Ranges
+        public static final PgType<PgRange<Integer>> INT4RANGE = createType(3904, (w, v) -> w.writeRange(v, INT4));
+        public static final PgType<PgRange<Long>> INT8RANGE = createType(3926, (w, v) -> w.writeRange(v, INT8));
+        public static final PgType<PgRange<BigDecimal>> NUMRANGE = createType(3906, (w, v) -> w.writeRange(v, NUMERIC));
+        public static final PgType<PgRange<LocalDateTime>> TSRANGE = createType(3908, (w, v) -> w.writeRange(v, TIMESTAMP));
+        public static final PgType<PgRange<Instant>> TSTZRANGE = createType(3910, (w, v) -> w.writeRange(v, TIMESTAMPTZ));
+        public static final PgType<PgRange<LocalDate>> DATERANGE = createType(3912, (w, v) -> w.writeRange(v, DATE));
+
+        // Arrays
         public static <E> PgType<Collection<E>> array(PgType<E> baseType) {
             return createType(0, (w, v) -> w.writeArray(v, baseType));
         }
