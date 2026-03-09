@@ -31,8 +31,7 @@ You can add the following dependencies to your pom.xml to include [PgBulkInsert]
 
 ## PgBulkInsert 9: Modern, Functional API ##
 
-PgBulkInsert 9.0.0 comes with a new API, that focuses on a functional API surface leveraging modern Java 
-features (Lambdas, Method References, and Records) and reduces memory allocation-overhead.
+PgBulkInsert 9.0.0 comes with a new API, that's functional and type-safe to work with. 
 
 ## Quick Start ##
 
