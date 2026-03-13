@@ -29,6 +29,8 @@ You can add the following dependencies to your pom.xml to include [PgBulkInsert]
 </dependency>
 ```
 
+The library is a single file, so you can also copy and paste the file into your project, without taking an additional dependency.  
+
 ## PgBulkInsert 9: Modern, Functional API ##
 
 PgBulkInsert 9.0.0 comes with a new API, that's functional and type-safe to work with. 
