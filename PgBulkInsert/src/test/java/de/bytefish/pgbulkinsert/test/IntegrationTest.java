@@ -1,6 +1,5 @@
 package de.bytefish.pgbulkinsert.test;
 
-import de.bytefish.pgbulkinsert.PgBulkInsert;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -25,6 +24,7 @@ import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static de.bytefish.pgbulkinsert.PgBulkInsert.*;
 
 public class IntegrationTest {
 
@@ -82,8 +82,8 @@ public class IntegrationTest {
             LocalDate dateVal,
             LocalTime timeVal,
             Instant timestampTzVal,
-            PgBulkInsert.PgRange<Integer> intRange,
-            PgBulkInsert.PgRange<LocalDateTime> tsRange,
+            PgRange<Integer> intRange,
+            PgRange<LocalDateTime> tsRange,
             List<String> tags
     ) {}
 
@@ -91,21 +91,21 @@ public class IntegrationTest {
     public void testBulkInsertSavesDataCorrectly() throws Exception {
 
         // Build the Test Subject
-        PgBulkInsert.PgMapper<TestEntity> mapper = PgBulkInsert.PgMapper.forClass(TestEntity.class)
-                .map("id", PgBulkInsert.PostgresTypes.INT8.primitive(TestEntity::id))
-                .map("text_val", PgBulkInsert.PostgresTypes.TEXT.removeNullCharacters().from(TestEntity::textVal))
-                .map("numeric_val", PgBulkInsert.PostgresTypes.NUMERIC.from(TestEntity::numericVal))
-                .map("numeric_int_val", PgBulkInsert.PostgresTypes.NUMERIC_INTEGER.from(TestEntity::numericIntVal))
-                .map("is_active", PgBulkInsert.PostgresTypes.BOOLEAN.primitive(TestEntity::isActive))
-                .map("created_at", PgBulkInsert.PostgresTypes.TIMESTAMP.localDateTime(TestEntity::createdAt))
-                .map("date_val", PgBulkInsert.PostgresTypes.DATE.from(TestEntity::dateVal))
-                .map("time_val", PgBulkInsert.PostgresTypes.TIME.from(TestEntity::timeVal))
-                .map("timestamptz_val", PgBulkInsert.PostgresTypes.TIMESTAMPTZ.instant(TestEntity::timestampTzVal))
-                .map("int_range", PgBulkInsert.PostgresTypes.range(PgBulkInsert.PostgresTypes.INT4).from(TestEntity::intRange))
-                .map("ts_range", PgBulkInsert.PostgresTypes.range(PgBulkInsert.PostgresTypes.TIMESTAMP).from(TestEntity::tsRange))
-                .map("tags", PgBulkInsert.PostgresTypes.array(PgBulkInsert.PostgresTypes.TEXT).from(TestEntity::tags));
+        PgMapper<TestEntity> mapper = PgMapper.forClass(TestEntity.class)
+                .map("id", PostgresTypes.INT8.primitive(TestEntity::id))
+                .map("text_val", PostgresTypes.TEXT.removeNullCharacters().from(TestEntity::textVal))
+                .map("numeric_val", PostgresTypes.NUMERIC.from(TestEntity::numericVal))
+                .map("numeric_int_val", PostgresTypes.NUMERIC_INTEGER.from(TestEntity::numericIntVal))
+                .map("is_active", PostgresTypes.BOOLEAN.primitive(TestEntity::isActive))
+                .map("created_at", PostgresTypes.TIMESTAMP.localDateTime(TestEntity::createdAt))
+                .map("date_val", PostgresTypes.DATE.from(TestEntity::dateVal))
+                .map("time_val", PostgresTypes.TIME.from(TestEntity::timeVal))
+                .map("timestamptz_val", PostgresTypes.TIMESTAMPTZ.instant(TestEntity::timestampTzVal))
+                .map("int_range", PostgresTypes.range(PostgresTypes.INT4).from(TestEntity::intRange))
+                .map("ts_range", PostgresTypes.range(PostgresTypes.TIMESTAMP).from(TestEntity::tsRange))
+                .map("tags", PostgresTypes.array(PostgresTypes.TEXT).from(TestEntity::tags));
 
-        PgBulkInsert.PgBulkWriter<TestEntity> writer = new PgBulkInsert.PgBulkWriter<>(mapper);
+        PgBulkWriter<TestEntity> writer = new PgBulkWriter<>(mapper);
 
         // Arrange
         LocalDateTime now = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS); // Postgres speichert auf Mikrosekunden genau
@@ -117,16 +117,16 @@ public class IntegrationTest {
                 new TestEntity(
                         1L, "Normaler Text", new BigDecimal("42.1234"), new BigInteger("98765432101234567890987654321"), true, now,
                         today, timeNow, instantNow,
-                        PgBulkInsert.PgRange.closedOpen(1, 100),
-                        PgBulkInsert.PgRange.closed(now.minusDays(1), now),
+                        PgRange.closedOpen(1, 100),
+                        PgRange.closed(now.minusDays(1), now),
                         List.of("java", "postgres")
                 ),
                 // Invalid Null to be removed
                 new TestEntity(
                         2L, "Fieser \u0000 Text", new BigDecimal("-99.99"), new BigInteger("-12345678909876543210123456789"), false, now.minusDays(1),
                         today.minusDays(1), timeNow.minusHours(1), instantNow.minus(1, ChronoUnit.DAYS),
-                        PgBulkInsert.PgRange.emptyRange(),
-                        PgBulkInsert.PgRange.atLeast(now),
+                        PgRange.emptyRange(),
+                        PgRange.atLeast(now),
                         Arrays.asList("test", null, "array")
                 )
         );
