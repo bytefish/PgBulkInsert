@@ -1,8 +1,6 @@
 package de.bytefish.pgbulkinsert.test;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -21,6 +19,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.math.BigInteger;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,8 +29,8 @@ public class IntegrationTest {
 
     private static Connection connection;
 
-    @BeforeAll
-    public static void setupDatabase() throws Exception {
+    @BeforeEach
+    public  void setupDatabase() throws Exception {
         Properties properties = getProperties("db.properties");
 
         connection = DriverManager.getConnection(
@@ -61,8 +60,8 @@ public class IntegrationTest {
         }
     }
 
-    @AfterAll
-    public static void teardownDatabase() throws Exception {
+    @AfterEach
+    public void teardownDatabase() throws Exception {
         if (connection != null) {
             try (Statement stmt = connection.createStatement()) {
                 stmt.execute("DROP TABLE IF EXISTS integration_test_data");
@@ -115,7 +114,7 @@ public class IntegrationTest {
 
         List<TestEntity> entities = Arrays.asList(
                 new TestEntity(
-                        1L, "Normaler Text", new BigDecimal("42.1234"), new BigInteger("98765432101234567890987654321"), true, now,
+                        1L, "Normal Text", new BigDecimal("42.1234"), new BigInteger("98765432101234567890987654321"), true, now,
                         today, timeNow, instantNow,
                         PgRange.closedOpen(1, 100),
                         PgRange.closed(now.minusDays(1), now),
@@ -123,7 +122,7 @@ public class IntegrationTest {
                 ),
                 // Invalid Null to be removed
                 new TestEntity(
-                        2L, "Fieser \u0000 Text", new BigDecimal("-99.99"), new BigInteger("-12345678909876543210123456789"), false, now.minusDays(1),
+                        2L, "Bad \u0000 Text", new BigDecimal("-99.99"), new BigInteger("-12345678909876543210123456789"), false, now.minusDays(1),
                         today.minusDays(1), timeNow.minusHours(1), instantNow.minus(1, ChronoUnit.DAYS),
                         PgRange.emptyRange(),
                         PgRange.atLeast(now),
@@ -185,6 +184,33 @@ public class IntegrationTest {
             assertEquals("array", tags2[2]);
 
             assertTrue(!rs.next());
+        }
+    }
+
+    @Test
+    public void testBulkInsertWithStreamSavesDataCorrectly() throws Exception {
+        // Build the Mapper
+        PgMapper<TestEntity> mapper = PgMapper.forClass(TestEntity.class)
+                .map("id", PostgresTypes.INT8.primitive(TestEntity::id))
+                .map("text_val", PostgresTypes.TEXT.from(TestEntity::textVal));
+
+        PgBulkWriter<TestEntity> writer = new PgBulkWriter<>(mapper);
+
+        // Arrange: Create a Stream of entities
+        Stream<TestEntity> entityStream = Stream.of(
+                new TestEntity(10L, "Stream Item 1", null, null, true, null, null, null, null, null, null, null),
+                new TestEntity(11L, "Stream Item 2", null, null, true, null, null, null, null, null, null, null)
+        );
+
+        // Act: Use the new Stream overload
+        writer.saveAll(connection, "integration_test_data", entityStream);
+
+        // Assert
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT count(*) FROM integration_test_data WHERE id IN (10, 11)")) {
+
+            assertTrue(rs.next());
+            assertEquals(2, rs.getInt(1), "Both entities from the stream should be saved.");
         }
     }
 

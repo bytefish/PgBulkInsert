@@ -8,6 +8,7 @@ import org.postgresql.copy.PGCopyOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.Inet4Address;
@@ -19,9 +20,10 @@ import java.time.*;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.function.*;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 public class PgBulkInsert {
-
 
     @FunctionalInterface
     public interface ToFloatFunction<T> {
@@ -33,6 +35,21 @@ public class PgBulkInsert {
         short applyAsShort(T value);
     }
 
+    @FunctionalInterface
+    public interface ThrowingConsumer<T, E extends Exception> {
+        void accept(T t) throws E;
+    }
+
+    public static <T> Consumer<T> throwingConsumer(ThrowingConsumer<T, IOException> consumer) {
+        return i -> {
+            try {
+                consumer.accept(i);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        };
+    }
+
     // Geometric Types
     public record PgPoint(double x, double y) {}
     public record PgLine(double a, double b, double c) {}
@@ -41,7 +58,6 @@ public class PgBulkInsert {
     public record PgPath(boolean closed, List<PgPoint> points) {}
     public record PgPolygon(List<PgPoint> points) {}
     public record PgCircle(PgPoint center, double radius) {}
-
 
     public record PgRange<T>(T lower, T upper, boolean lowerInclusive, boolean upperInclusive, boolean lowerInfinite,
                              boolean upperInfinite, boolean empty) {
@@ -145,7 +161,6 @@ public class PgBulkInsert {
         // Ranges
         <E> void writeRange(PgRange<E> range, PgType<E> elementType) throws IOException;
     }
-
 
     public static class PgBinaryWriter implements BinaryRowWriter {
         private final DataOutputStream out;
@@ -717,7 +732,6 @@ public class PgBulkInsert {
             @Override public void write(BinaryRowWriter w, String v) throws IOException { w.writeJsonb(v); }
         };
 
-
         public static final PgType<BigDecimal> NUMERIC = createType(1700, BinaryRowWriter::writeNumeric);
         public static final PgType<BigInteger> NUMERIC_INTEGER = createType(1700, BinaryRowWriter::writeNumeric);
         public static final PgType<byte[]> BYTEA = createType(17, BinaryRowWriter::writeByteArray);
@@ -845,6 +859,16 @@ public class PgBulkInsert {
         }
 
         public void saveAll(Connection connection, String tableName, Iterable<T> entities) throws SQLException, IOException {
+            Stream<T> stream = StreamSupport.stream(entities.spliterator(), false);
+
+            saveAll(connection, tableName, stream);
+        }
+
+        public void saveAll(Connection connection, String tableName, Collection<T> entities) throws SQLException, IOException {
+            saveAll(connection, tableName, entities.stream());
+        }
+
+        public void saveAll(Connection connection, String tableName, Stream<T> entities) throws SQLException, IOException {
             PGConnection pgConn = connection.unwrap(PGConnection.class);
 
             String sql = "COPY " + tableName + " (" + String.join(", ", mapper.getColumnNames()) + ") FROM STDIN BINARY";
@@ -859,10 +883,18 @@ public class PgBulkInsert {
                 PgBinaryWriter binaryWriter = new PgBinaryWriter(dataOut);
                 int columnCount = mapper.getColumnCount();
 
-                for (T entity : entities) {
-                    dataOut.writeShort(columnCount);
-                    mapper.writeRow(binaryWriter, entity);
+                try {
+                    entities.forEach(throwingConsumer(entity -> {
+                        dataOut.writeShort(columnCount);
+
+                        mapper.writeRow(binaryWriter, entity);
+                    }));
+                } catch(UncheckedIOException e) {
+                    IOException originalException = e.getCause();
+
+                    throw originalException;
                 }
+
                 dataOut.writeShort(-1);
             }
         }
