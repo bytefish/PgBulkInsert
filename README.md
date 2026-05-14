@@ -90,23 +90,21 @@ try (Connection conn = dataSource.getConnection()) {
 
 ## Streaming and Lazy Evaluation ##
 
-One of the key strengths of the `saveAll` method is that it accepts an `Iterable<T>`. This means you are never 
-forced to load your entire dataset into memory.
-
 If you are working with a Java Stream (e.g., from a file, a reactive source, or another database), you 
-can pass it directly using a method reference:
+can pass it directly:
 
 ```java
 Stream<UserSession> massiveStream = getMassiveStreamFromSource();
 
 try (Connection conn = dataSource.getConnection()) {
     // Uses the stream's iterator to pull data lazily
-    writer.saveAll(conn, "public.user_sessions", massiveStream::iterator);
+    writer.saveAll(conn, "public.user_sessions", massiveStream);
 }
 ```
 
 This approach ensures that records are transformed and written to the PostgreSQL wire format on-the-fly, 
-keeping your application's memory usage constant regardless of the total number of rows.
+keeping your application's memory usage constant regardless of the total number of rows. You can also 
+pass a `Collection<T>` or an `Iterable<T>` to the method.
 
 ## Mastering the Fluent API ##
 
